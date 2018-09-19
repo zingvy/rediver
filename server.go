@@ -170,6 +170,7 @@ func (s *Rediver) Serving() {
 /////////////////////////
 
 type Subject struct {
+	Env    string
 	App    string
 	Module string
 	Method string
@@ -180,10 +181,11 @@ func parseSubject(subj string) *Subject {
 	if len(n) < 2 {
 		log.Panic("invalid subject: " + subj)
 	}
-	app := n[0]
-	module := strings.Join(n[1:len(n)-1], ".")
+	env := n[0]
+	app := n[1]
+	module := strings.Join(n[2:len(n)-1], ".")
 	method := n[len(n)-1]
-	return &Subject{app, module, method}
+	return &Subject{env, app, module, method}
 }
 
 func (s *Rediver) dispatcher(data []byte) {

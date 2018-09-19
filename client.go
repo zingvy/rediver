@@ -4,14 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/mediocregopher/radix.v3"
-	"strings"
 	"sync"
 	"time"
 )
 
 type Client struct {
 	id  string
-	env string
 
 	redisC   radix.Client
 	receiver radix.PubSubConn
@@ -21,10 +19,9 @@ type Client struct {
 	receiveChan chan radix.PubSubMessage
 }
 
-func NewClient(env, redisAddr string) *Client {
+func NewClient(redisAddr string) *Client {
 	c := &Client{
 		id:  RandString(8, ""),
-		env: env,
 
 		redisC:      dialRedis(redisAddr),
 		sendChan:    make(chan *Msg),
@@ -53,7 +50,9 @@ func (c *Client) send() {
 		if err != nil {
 			continue
 		}
-		key := c.env + ":" + m.Subject[:strings.Index(m.Subject, ".")]
+		sub := parseSubject(m.Subject)
+		key := sub.Env+":"+sub.App
+
 		c.redisC.Do(radix.Cmd(nil, "LPUSH", key, string(b)))
 	}
 }
