@@ -3,7 +3,7 @@ package rediver
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/mediocregopher/radix.v3"
+	"github.com/mediocregopher/radix"
 	"sync"
 	"time"
 )
