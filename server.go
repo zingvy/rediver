@@ -2,7 +2,7 @@ package rediver
 
 import (
 	"encoding/json"
-	"github.com/mediocregopher/radix.v3"
+	"github.com/mediocregopher/radix"
 	"os"
 	"os/signal"
 	"reflect"
