@@ -2,7 +2,8 @@ package rediver
 
 import (
 	"encoding/json"
-	"github.com/mediocregopher/radix"
+	"github.com/go-redis/redis"
+	"fmt"
 	"os"
 	"os/signal"
 	"reflect"
@@ -28,7 +29,9 @@ type Rediver struct {
 	env      string
 	app      string
 
-	redisPool radix.Client
+	readPool *redis.Client
+
+	replyPool *redis.Client
 	replyChan chan *ReqContext
 
 	wg      sync.WaitGroup
@@ -38,19 +41,24 @@ type Rediver struct {
 	reqChan   chan []byte
 }
 
-func dialRedis(redisAddr ...string) radix.Client {
-	var c radix.Client
-
+func dialRedis(redisAddr ...string) *redis.Client {
+	var c *redis.Client
 	if len(redisAddr) == 1 {
-		c, err := radix.NewPool("tcp", redisAddr[0], DefaultPoolSize)
-		if err != nil {
-			log.Panic(err)
-		}
-		return c
+		c = redis.NewClient(&redis.Options{
+    		Addr:     redisAddr[0],
+			MinIdleConns: DefaultPoolSize,
+			MaxConnAge: 0,
+		})
 	} else {
-		// TODO  with sentinel or cluster
+		c = redis.NewFailoverClient(&redis.FailoverOptions{
+    		MasterName:    "master", //TODO
+    		SentinelAddrs: redisAddr,
+		})
 	}
-
+	_, err := c.Ping().Result()
+	if err != nil {
+		panic("ping to redis error: " + err.Error())
+	}
 	return c
 }
 
@@ -61,7 +69,8 @@ func New(env, app, id, redisAddr string) *Rediver {
 		middles:   make([]MiddleFunc, 0),
 		env:       env,
 		app:       app,
-		redisPool: dialRedis(redisAddr),
+		readPool:  dialRedis(redisAddr),
+		replyPool: dialRedis(redisAddr),
 		replyChan: make(chan *ReqContext),
 
 		closeChan: make(chan bool, 1),
@@ -94,7 +103,7 @@ func (s *Rediver) reply() {
 		if err != nil {
 			continue
 		}
-		s.redisPool.Do(radix.Cmd(nil, "PUBLISH", r.reply, string(jsonByte)))
+		s.replyPool.Publish(r.reply, jsonByte)
 	}
 }
 
@@ -124,24 +133,20 @@ func (s *Rediver) Use(funcs ...MiddleFunc) {
 
 func (s *Rediver) pop() {
 	queue := s.env + ":" + s.app
-	s.redisPool.Do(radix.WithConn(queue, func(conn radix.Conn) error {
-		go func(c radix.Conn) {
-			<-s.closeChan
-			c.Close()
-		}(conn)
+	go func() {
+		<- s.closeChan
+		s.readPool.Close()
+	}()
 
-		for {
-			var v [][]byte
-			if err := conn.Do(radix.Cmd(&v, "BRPOP", queue, "0")); err != nil {
-				log.Println("error when getting task: ", err)
-				s.reqChan <- nil
-				return err
-			} else {
-				s.reqChan <- v[1]
-			}
+	for {
+		result, err := s.readPool.BLPop(0, queue).Result()
+		if err != nil {
+			log.Println("error when getting task: ", err)
+			s.reqChan <- nil
+		} else {
+			s.reqChan <- []byte(result[1])	
 		}
-		return nil
-	}))
+	}
 }
 
 func (s *Rediver) Serving() {
@@ -162,7 +167,8 @@ func (s *Rediver) Serving() {
 	}
 	s.wg.Wait()
 	s.replyChan <- nil
-	s.redisPool.Close()
+	s.readPool.Close()
+	s.replyPool.Close()
 }
 
 /////////////////////////
@@ -176,16 +182,16 @@ type Subject struct {
 	Method string
 }
 
-func parseSubject(subj string) *Subject {
+func parseSubject(subj string) (*Subject, error) {
 	n := strings.Split(subj, ".")
-	if len(n) < 2 {
-		log.Panic("invalid subject: " + subj)
+	if len(n) < 3 {
+		return nil, fmt.Errorf("invalid subject")
 	}
 	env := n[0]
 	app := n[1]
 	module := strings.Join(n[2:len(n)-1], ".")
 	method := n[len(n)-1]
-	return &Subject{env, app, module, method}
+	return &Subject{env, app, module, method}, nil
 }
 
 func (s *Rediver) dispatcher(data []byte) {
@@ -222,7 +228,12 @@ func (s *Rediver) dispatcher(data []byte) {
 		return
 	}
 
-	subj := parseSubject(msg.Subject)
+	subj, err := parseSubject(msg.Subject)
+	if err != nil {
+		log.Printf("invalid request, abort: <path:%s>, <id:%s>\n", msg.Subject, msg.Reply)
+		return
+
+	}
 	rc = &ReqContext{
 		Module:    subj.Module,
 		Method:    subj.Method,

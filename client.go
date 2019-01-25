@@ -3,7 +3,7 @@ package rediver
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/mediocregopher/radix"
+	"github.com/go-redis/redis"
 	"sync"
 	"time"
 )
@@ -11,26 +11,16 @@ import (
 type Client struct {
 	id  string
 
-	redisC   radix.Client
-	receiver radix.PubSubConn
-
+	redisC   *redis.Client
 	msgMap      sync.Map
 	sendChan    chan *Msg
-	receiveChan chan radix.PubSubMessage
 }
 
 func NewClient(redisAddr string) *Client {
 	c := &Client{
 		id:  RandString(8, ""),
-
 		redisC:      dialRedis(redisAddr),
 		sendChan:    make(chan *Msg),
-		receiveChan: make(chan radix.PubSubMessage),
-		receiver:    radix.PersistentPubSub("tcp", redisAddr, nil),
-	}
-
-	if err := c.receiver.PSubscribe(c.receiveChan, c.id+".*"); err != nil {
-		panic(err)
 	}
 
 	go c.receive()
@@ -46,31 +36,45 @@ func (c *Client) send() {
 			break
 		}
 
-		b, err := json.Marshal(m)
-		if err != nil {
+		msgch, ok := c.msgMap.Load(m.Reply)
+		if !ok {
+			msgch.(chan []byte) <- []byte("invalid request")
 			continue
 		}
-		sub := parseSubject(m.Subject)
+		b, err := json.Marshal(m)
+		if err != nil {
+			msgch.(chan []byte) <- []byte("invalid request")
+			continue
+		}
+
+		sub, err := parseSubject(m.Subject)
+		if err != nil {
+			msgch.(chan []byte) <- []byte("invalid request")
+			continue
+			
+		}
 		key := sub.Env+":"+sub.App
 
-		c.redisC.Do(radix.Cmd(nil, "LPUSH", key, string(b)))
+		c.redisC.LPush(key, b)
 	}
 }
 
 func (c *Client) receive() {
-	for {
-		msg := <-c.receiveChan
+	pubsub := c.redisC.PSubscribe(c.id+".*")
+	defer pubsub.Close()
+
+	ch := pubsub.Channel()
+	for msg := range ch {
 		msgch, ok := c.msgMap.Load(msg.Channel)
 		if !ok {
 			fmt.Println("no func found by:", msg.Channel)
 			continue
 		}
-		msgch.(chan []byte) <- msg.Message
+		msgch.(chan []byte) <- []byte(msg.Payload)
 	}
 }
 
 func (c *Client) Request(path string, data map[string]interface{}, timeout time.Duration, headerAndCookie ...map[string]interface{}) ([]byte, error) {
-
 	reply := c.id + "." + RandString(32, "")
 	msg := &Msg{
 		Data:    data,
