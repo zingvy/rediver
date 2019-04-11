@@ -9,18 +9,18 @@ import (
 )
 
 type Client struct {
-	id  string
+	id string
 
 	redisC   *redis.Client
-	msgMap      sync.Map
-	sendChan    chan *Msg
+	msgMap   sync.Map
+	sendChan chan *Msg
 }
 
 func NewClient(redisAddr string) *Client {
 	c := &Client{
-		id:  RandString(8, ""),
-		redisC:      dialRedis(redisAddr),
-		sendChan:    make(chan *Msg),
+		id:       RandString(8, ""),
+		redisC:   dialRedis(redisAddr),
+		sendChan: make(chan *Msg),
 	}
 
 	go c.receive()
@@ -38,29 +38,29 @@ func (c *Client) send() {
 
 		msgch, ok := c.msgMap.Load(m.Reply)
 		if !ok {
-			msgch.(chan []byte) <- []byte("invalid request")
+			msgch.(chan []byte) <- []byte("Rediver-Client: invalid request for non-exists message channel")
 			continue
 		}
 		b, err := json.Marshal(m)
 		if err != nil {
-			msgch.(chan []byte) <- []byte("invalid request")
+			msgch.(chan []byte) <- []byte("Rediver-Client: invalid request for invalid message body")
 			continue
 		}
 
 		sub, err := parseSubject(m.Subject)
 		if err != nil {
-			msgch.(chan []byte) <- []byte("invalid request")
+			msgch.(chan []byte) <- []byte("Rediver-Client: invalid request for invalid Subject")
 			continue
-			
+
 		}
-		key := sub.Env+":"+sub.App
+		key := sub.Env + ":" + sub.App
 
 		c.redisC.LPush(key, b)
 	}
 }
 
 func (c *Client) receive() {
-	pubsub := c.redisC.PSubscribe(c.id+".*")
+	pubsub := c.redisC.PSubscribe(c.id + ".*")
 	defer pubsub.Close()
 
 	ch := pubsub.Channel()

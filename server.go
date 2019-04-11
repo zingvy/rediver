@@ -2,17 +2,18 @@ package rediver
 
 import (
 	"encoding/json"
-	"github.com/go-redis/redis"
 	"fmt"
+	"github.com/go-redis/redis"
+	"log"
 	"os"
 	"os/signal"
 	"reflect"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
-	"log"
 )
 
 const (
@@ -45,14 +46,14 @@ func dialRedis(redisAddr ...string) *redis.Client {
 	var c *redis.Client
 	if len(redisAddr) == 1 {
 		c = redis.NewClient(&redis.Options{
-    		Addr:     redisAddr[0],
+			Addr:         redisAddr[0],
 			MinIdleConns: DefaultPoolSize,
-			MaxConnAge: 0,
+			MaxConnAge:   0,
 		})
 	} else {
 		c = redis.NewFailoverClient(&redis.FailoverOptions{
-    		MasterName:    "master", //TODO
-    		SentinelAddrs: redisAddr,
+			MasterName:    "master", //TODO
+			SentinelAddrs: redisAddr,
 		})
 	}
 	_, err := c.Ping().Result()
@@ -134,7 +135,7 @@ func (s *Rediver) Use(funcs ...MiddleFunc) {
 func (s *Rediver) pop() {
 	queue := s.env + ":" + s.app
 	go func() {
-		<- s.closeChan
+		<-s.closeChan
 		s.readPool.Close()
 	}()
 
@@ -144,7 +145,7 @@ func (s *Rediver) pop() {
 			log.Println("error when getting task: ", err)
 			s.reqChan <- nil
 		} else {
-			s.reqChan <- []byte(result[1])	
+			s.reqChan <- []byte(result[1])
 		}
 	}
 }
@@ -206,8 +207,19 @@ func (s *Rediver) dispatcher(data []byte) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("SERVER INTERNAL ERROR: <path:%s>, <id:%s>\n", msg.Subject, msg.Reply)
+			debug.PrintStack()
+
 			if rc != nil {
-				rc.Error(500, nil, "SERVER INTERNAL ERROR: "+r.(string))
+				errStr := ""
+				switch x := r.(type) {
+				case string:
+					errStr = x
+				case error:
+					errStr = x.Error()
+				default:
+					errStr = "UNKNOWN ERROR"
+				}
+				rc.Error(500, nil, "SERVER INTERNAL ERROR: "+errStr)
 			}
 		}
 	}()
@@ -242,6 +254,7 @@ func (s *Rediver) dispatcher(data []byte) {
 		Param:     msg.Data,
 		Header:    msg.Header,
 		Cookie:    msg.Cookie,
+		Resp:      &Response{},
 		StartTime: time.Unix(0, start),
 	}
 
