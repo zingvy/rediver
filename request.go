@@ -38,6 +38,15 @@ type Response struct {
 
 type Params map[string]interface{}
 
+// GetString or panic
+func (p Params) GetWithError(key string) (string, error)  {
+	v, ok := p[key]
+	if !ok {
+		return "", fmt.Errorf(key)
+	}
+	return v.(string), nil
+}
+
 // by default return string
 func (p Params) Get(key string) string {
 	return p.GetString(key)
