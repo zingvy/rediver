@@ -38,6 +38,11 @@ type Response struct {
 
 type Params map[string]interface{}
 
+func (p Params) Has(key string) bool {
+	_, ok := p[key]
+	return ok
+}
+
 // GetString or panic
 func (p Params) GetWithError(key string) (string, error)  {
 	v, ok := p[key]
