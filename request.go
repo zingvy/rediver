@@ -34,6 +34,7 @@ type Response struct {
 	Errmsg string         `json:"errmsg"`
 	Result interface{}    `json:"result"`
 	Cookie []*http.Cookie `json:"COOKIE,omitempty"`
+	Header map[string]string `json:"HEADER,omitempty"`
 }
 
 type Params map[string]interface{}
@@ -82,6 +83,7 @@ func NewResponse(code int, result interface{}) *Response {
 	res := new(Response)
 	res.Code = code
 	res.Result = result
+	res.Header = map[string]string{"Content-Type": "application/json"}
 	return res
 }
 
@@ -120,6 +122,15 @@ func (rc *ReqContext) Error(code int, result interface{}, errorMsg string) {
 
 func (rc *ReqContext) Json(result interface{}) {
 	res := NewResponse(0, result)
+	if len(rc.newCookies) > 0 {
+		res.Cookie = rc.newCookies
+	}
+	rc.Resp = res
+}
+
+func (rc *ReqContext) Text(result string) {
+	res := NewResponse(0, result)
+	res.Header["Content-Type"] = "text/plain"
 	if len(rc.newCookies) > 0 {
 		res.Cookie = rc.newCookies
 	}
