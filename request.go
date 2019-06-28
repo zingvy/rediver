@@ -136,3 +136,12 @@ func (rc *ReqContext) Text(result string) {
 	}
 	rc.Resp = res
 }
+
+func (rc *ReqContext) Image(result []byte) {
+	res := NewResponse(0, result)
+	res.Header["Content-Type"] = "image/jpg"
+	if len(rc.newCookies) > 0 {
+		res.Cookie = rc.newCookies
+	}
+	rc.Resp = res
+}
